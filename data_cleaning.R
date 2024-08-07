@@ -405,6 +405,9 @@ central_crossrail_stations <- c("Whitechapel Station", "Bond Street Station", "T
 # nanmes in nearest_Station 
 unique(properties_with_census$nearest_station)
 
+#remove rows with O in property_type
+properties_with_census <- properties_with_census %>%
+  filter(property_type != "O")
 
 # analysis!
 
@@ -450,14 +453,41 @@ eastern_subset <- properties_with_census %>%
 central_subset <- properties_with_census %>%
   filter(nearest_station %in% central_crossrail_stations)
 
-# Transform the dependent variable
-properties_with_census$log_price <- log(properties_with_census$price)
+# make summary stats dataset
+summary_data <- properties_with_census
 
-#remove rows with O in property_type
-properties_with_census <- properties_with_census %>%
-  filter(property_type != "O")
+
+
+center_predictors <- function(data, predictors, means) {
+  centered_data <- data
+  for (var in predictors) {
+    centered_data[[var]] <- data[[var]] - means[[var]]
+  }
+  return(centered_data)
+}
+
+
+# non-centred datasets
+non_centred_properties_with_census <- properties_with_census
+non_centred_western_subset <- western_subset
+non_centred_eastern_subset <- eastern_subset
+non_centred_central_subset <- central_subset
 
 #summary table
+
+# Calculate the mean of each predictor for the full dataset
+predictors <- c("close_to_crossrail", "post_treatment", "log_underground_distance", 
+                "log_population_density", "log_min_distance_to_caz", 
+                "semi_detached_binary", "flat_binary", "avg_bedrooms", 
+                "average_qualification_level_4")
+
+means <- sapply(properties_with_census[predictors], mean, na.rm = TRUE)
+
+# Center the predictors for all datasets
+properties_with_census <- center_predictors(properties_with_census, predictors, means)
+western_subset <- center_predictors(western_subset, predictors, means)
+eastern_subset <- center_predictors(eastern_subset, predictors, means)
+central_subset <- center_predictors(central_subset, predictors, means)
 
 
 # Run the DiD regression model
@@ -472,6 +502,18 @@ summary(did_model)
 
 # Check VIF
 vif(did_model, type = "predictor")
+library(lmtest)
+
+# Perform the Durbin-Watson test
+dw_test <- dwtest(did_model)
+print(dw_test)
+
+library(AER)
+
+properties_with_census %>% lm(log_price ~ close_to_crossrail * post_treatment +
+  log_underground_distance  +  log_population_density  + 
+  log_min_distance_to_caz +  semi_detached_binary + detached_binary + 
+  flat_binary + avg_bedrooms + average_qualification_level_4, data = . ) %>% plot(which=1) 
 
 # western london model
 # Run the DiD regression model
@@ -517,12 +559,46 @@ bptest(did_model, studentize = FALSE)
 
 resettest(did_model, power = 2:3, type = "fitted")
 
-qqnorm(did_model$residuals)
-qqline(did_model$residuals,col="red")
+qqnorm(non_detached_model$residuals)
+qqline(non_detached_model$residuals,col="red")
 
 plot(y=did_model$residuals, x=did_model$fitted.values, xlab= "Fitted Values", ylab="Residuals")
 abline(h=0, col="red")
 
+# Perform the Breusch-Pagan test
+bp_test <- bptest(non_detached_model, studentize = FALSE)
+print(bp_test)
+
+# Create the Residuals vs Fitted plot
+plot(did_model$fitted.values, residuals(did_model),
+     main = "Residuals vs Fitted Values",
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     pch = 20, col = "blue")
+abline(h = 0, col = "red", lwd = 2)
+
+
+library(MASS)
+
+# Fit robust regression model
+robust_model <- rlm(log_price ~ close_to_crossrail * post_treatment +
+                      log_underground_distance  +  log_population_density  + 
+                      log_min_distance_to_caz +  semi_detached_binary + detached_binary + 
+                      flat_binary + avg_bedrooms + average_qualification_level_4,
+                    data = properties_with_census)
+
+# Summarize the robust model
+summary(robust_model)
+
+residuals <- residuals(did_model)
+
+# Load necessary package
+library(ggplot2)
+
+# Histogram of residuals
+ggplot(data.frame(residuals), aes(x = residuals)) +
+  geom_histogram(binwidth = 0.1, fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency")
 
 
 library(stargazer)
@@ -610,6 +686,8 @@ non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment +
 
 summary(non_detached_model)
 
+vif(non_detached_model, type = "predictor")
+
 #WESTERN
 # Run the DiD regression model
 western_non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment +
@@ -640,71 +718,75 @@ central_non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment
 
 summary(central_non_detached_model)
 
-# Calculate the mean of each predictor for the full dataset
-predictors <- c("close_to_crossrail", "post_treatment", "log_underground_distance", 
-                "log_population_density", "log_min_distance_to_caz", 
-                "semi_detached_binary", "flat_binary", "avg_bedrooms", 
-                "average_qualification_level_4")
+# Model for detached properties
+detached_model <- lm(log_price ~ nearest_crossrail * post_treatment +
+                       log_underground_distance  +  log_population_density  + 
+                       log_min_distance_to_caz + avg_bedrooms + average_qualification_level_4,
+                     data = subset(eastern_subset, property_type == "F"))
 
-means <- sapply(properties_with_census[predictors], mean, na.rm = TRUE)
-# Center the predictors for the full dataset
-properties_with_census_centered <- properties_with_census
-for (var in predictors) {
-  properties_with_census_centered[[var]] <- properties_with_census[[var]] - means[[var]]
-}
-# Center the predictors for the western subset
-western_subset_centered <- western_subset
-for (var in predictors) {
-  western_subset_centered[[var]] <- western_subset[[var]] - means[[var]]
-}
+# Summarize the detached model
+summary(detached_model)
 
-# Center the predictors for the eastern subset
-eastern_subset_centered <- eastern_subset
-for (var in predictors) {
-  eastern_subset_centered[[var]] <- eastern_subset[[var]] - means[[var]]
-}
+library(lmtest)
+library(sandwich)
+# could put in appendixes - is it needed? the coeftest function from the lmtest package in R is used to test the significance of the coefficients in a linear model. Specifically, it provides a summary of the model's coefficients, including their estimates, standard errors, t-values, and p-values. This allows you to assess whether each predictor variable has a statistically significant effect on the dependent variable.
+coeftest(non_detached_model, vcov= vcovHC)
 
-# Center the predictors for the central subset
-central_subset_centered <- central_subset
-for (var in predictors) {
-  central_subset_centered[[var]] <- central_subset[[var]] - means[[var]]
-}
-# Full model without detached properties
-non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment +
-                           log_underground_distance  +  log_population_density  + 
-                           log_min_distance_to_caz + semi_detached_binary + flat_binary + 
-                           avg_bedrooms + average_qualification_level_4, 
-                         data = subset(properties_with_census_centered, property_type != "D"))
+#theres heteroscedacity - use robust standard errors (coeftest in appendix)
+bptest(non_detached_model, studentize = FALSE)
+resettest(detached_model, power = 2:3, type = "fitted")
 
-summary(non_detached_model)
+qqnorm(non_detached_model$residuals)
+qqline(non_detached_model$residuals,col="red")
 
-# Western model without detached properties
-western_non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment +
-                                   log_underground_distance  +  log_population_density  + 
-                                   log_min_distance_to_caz + semi_detached_binary + flat_binary + 
-                                   avg_bedrooms + average_qualification_level_4, 
-                                 data = subset(western_subset_centered, property_type != "D"))
+plot(y=non_detached_model$residuals, x=non_detached_model$fitted.values, xlab= "Fitted Values", ylab="Residuals")
+abline(h=0, col="red")
 
-summary(western_non_detached_model)
+# Perform the Breusch-Pagan test
+bp_test <- bptest(non_detached_model)
+print(non_detached_model)
 
-# Eastern model without detached properties
-eastern_non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment +
-                                   log_underground_distance  +  log_population_density  + 
-                                   log_min_distance_to_caz + semi_detached_binary + flat_binary + 
-                                   avg_bedrooms + average_qualification_level_4, 
-                                 data = subset(eastern_subset_centered, property_type != "D"))
+# Create the Residuals vs Fitted plot
+plot(non_detached_model$fitted.values, residuals(non_detached_model),
+     main = "Residuals vs Fitted Values",
+     xlab = "Fitted Values",
+     ylab = "Residuals",
+     pch = 20, col = "blue")
+abline(h = 0, col = "red", lwd = 2)
 
-summary(eastern_non_detached_model)
 
-# Central model without detached properties
-central_non_detached_model <- lm(log_price ~ close_to_crossrail * post_treatment +
-                                   log_underground_distance  +  log_population_density  + 
-                                   log_min_distance_to_caz + semi_detached_binary + flat_binary + 
-                                   avg_bedrooms + average_qualification_level_4, 
-                                 data = subset(central_subset_centered, property_type != "D"))
+library(MASS)
 
-summary(central_non_detached_model)
+# Fit robust regression model
+robust_model <- rlm(log_price ~ close_to_crossrail * post_treatment +
+                      log_underground_distance  +  log_population_density  + 
+                      log_min_distance_to_caz +  semi_detached_binary + detached_binary + 
+                      flat_binary + avg_bedrooms + average_qualification_level_4,
+                    data = subset(properties_with_census, property_type != "D"))
 
+# Summarize the robust model
+summary(robust_model)
+
+residuals <- residuals(non_detached_model)
+
+# Load necessary package
+library(ggplot2)
+
+# Histogram of residuals
+ggplot(data.frame(residuals), aes(x = residuals)) +
+  geom_histogram(binwidth = 0.1, fill = "blue", alpha = 0.7) +
+  labs(title = "Histogram of Residuals", x = "Residuals", y = "Frequency")
+
+# Perform the Durbin-Watson test
+dw_test <- dwtest(eastern_non_detached_model)
+print(dw_test)
+
+library(AER)
+
+subset(properties_with_census, property_type != "D") %>% lm(log_price ~ close_to_crossrail * post_treatment +
+                                log_underground_distance  +  log_population_density  + 
+                                log_min_distance_to_caz +  semi_detached_binary + detached_binary + 
+                                flat_binary + avg_bedrooms + average_qualification_level_4, data = . ) %>% plot(which=1) 
 
 #stargazer
 stargazer(non_detached_model, western_non_detached_model, eastern_non_detached_model,  type = "text",
@@ -768,17 +850,18 @@ matchit_formula <- close_to_crossrail ~ post_treatment +
   avg_bedrooms + average_qualification_level_4
 
 # remove D from each of the datasets
-properties_with_census <- subset(properties_with_census, property_type != "D")
-western_subset <- subset(western_subset, property_type != "D")
-eastern_subset <- subset(eastern_subset, property_type != "D")
-central_subset <- subset(central_subset, property_type != "D")
+non_centred_properties_with_census <- subset(non_centred_properties_with_census, property_type != "D")
+non_centred_western_subset <- subset(non_centred_western_subset, property_type != "D")
+non_centred_eastern_subset <- subset(non_centred_eastern_subset, property_type != "D")
+non_centred_central_subset <- subset(non_centred_central_subset, property_type != "D")
+
 
 
 # Perform nearest neighbor matching
-full_psm <- matchit(matchit_formula, data = properties_with_census, method = "nearest")
-western_psm <- matchit(matchit_formula, data = western_subset, method = "nearest")
-eastern_psm <- matchit(matchit_formula, data = eastern_subset, method = "nearest")
-central_psm <- matchit(matchit_formula, data = central_subset, method = "nearest")
+full_psm <- matchit(matchit_formula, data = non_centred_properties_with_census, method = "nearest")
+western_psm <- matchit(matchit_formula, data = non_centred_western_subset, method = "nearest")
+eastern_psm <- matchit(matchit_formula, data = non_centred_eastern_subset, method = "nearest")
+central_psm <- matchit(matchit_formula, data = non_centred_central_subset, method = "nearest")
 
 set.cobalt.options(binary = "std")
 
@@ -927,168 +1010,23 @@ stargazer(central_did_model_matched, type = "text",
 
 
 
-
+library(ggplot2)
 #samples
+
+# new dataset with just propery type D
+detached_properties <- subset(properties_with_census, property_type == "D")
 # random sample of 1000 points from properties census
-sampled_data <- properties_with_census[sample(nrow(properties_with_census), 5000), ]
+sampled_data <- detached_properties[sample(nrow(non_centred_western_subset), 3000), ]
 
 # sample cr
 cr_model_full <- lm(log_price ~ close_to_crossrail + post_treatment +
                          log_underground_distance  +  log_population_density  + 
-                         log_min_distance_to_caz +  semi_detached_binary  + 
-                         flat_binary + avg_bedrooms + average_qualification_level_4,
-                       data = properties_with_census)
+                         log_min_distance_to_caz  + avg_bedrooms + average_qualification_level_4,
+                       data = detached_properties)
 summary(cr_model_full)
 crPlots(cr_model_full)
-#Save as rdata
-save(crplotfull, file = "crplotfull.RData")
-
-# export crplot as image
-ggsave("crplotfull.png", crplotfull)
 
 
-
-
-
-
-
-
-
-
-
-
-#using sample
-# Install and load necessary packages
-library(MatchIt)
-library(dplyr)
-library(cobalt)
-
-
-# Step 1: Estimate propensity scores and perform matching
-# Assuming 'close_to_crossrail' is the treatment indicator
-matchit_formula <- close_to_crossrail ~ log_underground_distance + log_population_density + 
-  employment_rate + percent_households_deprived + log_min_distance_to_caz +
-   terraced_binary + flat_binary
-
-# Perform nearest neighbor matching
-psm <- matchit(matchit_formula, data = sampled_data, method = "nearest")
-set.cobalt.options(binary = "std")
-
-# variable names 
-new.names <- c(flat_binary = "Flat",
-               terraced_binary = "Terraced",
-               close_to_crossrail = "Close to Crossrail",
-               log_underground_distance = "Underground Distance",
-               log_population_density = "Population Density",
-               employment_rate = "Employment Rate",
-               percent_households_deprived = "Household Deprivation")
-
-# Step 2: Check balance
-
-summary(psm)
-sample_plot <- love.plot(psm,
-          stars = "raw",
-          drop.distance = TRUE, 
-          var.order = "unadjusted",
-          var.names = new.names,
-          abs = TRUE,
-          line = TRUE, 
-          colors = c("#377EB8", "#E41A1C"),
-          thresholds = c(m = .1),
-position = c(.75, .25))+
-  theme(legend.box.background = element_rect(), 
-  legend.box.margin = margin(1, 1, 1, 1))
-
-sample_plot
-#need to define stars in text https://cran.r-project.org/web/packages/cobalt/vignettes/love.plot.html
-
-# Step 3: Extract matched data
-matched_data <- match.data(psm)
-
-# Step 4: Run the DiD regression model on matched data
-did_model_matched <- lm(log_price ~ close_to_crossrail * post_treatment +
-                          log_underground_distance  +  log_population_density  + 
-                          employment_rate + percent_households_deprived + 
-                           terraced_binary + flat_binary,
-                        data = matched_data)
-
-# Summarize the matched model
-summary(did_model_matched)
-
-
-
-summary_table_df <- properties_with_census
-
-# Load necessary library
-library(dplyr)
-
-# Calculate mean and standard deviation for each variable
-variables <- c("log_price", "close_to_crossrail", "nearest_crossrail,", "post_treatment", "log_underground_distance", 
-               "log_population_density", "log_min_distance_to_caz", "semi_detached_binary", 
-               "detached_binary", "flat_binary", "avg_bedrooms", "average_qualification_level_4")
-
-means <- sapply(summary_table_df[variables], mean, na.rm = TRUE)
-std_devs <- sapply(summary_table_df[variables], sd, na.rm = TRUE)
-
-# Manually input descriptions, sources, and units
-descriptions <- c(
-  "Property price",
-  "1 within 1km of Crossrail station, 0 if not",
-  "Distance to nearest Crossrail station"
-  "1 if post opening, 0 if not",
-  "Distance to nearest underground station",
-  "Population density",
-  "Distance to Central Activities Zone",
-  "1 if semi-detached house, 0 if not",
-  "1 if detached house, 0 if not",
-  "1 if a flat, 0 if not",
-  "Average number of bedrooms in Output Area",
-  "Proportion with Level 4 qualification or above in Output area"
-)
-
-sources <- c(
-  "Housing dataset",
-  "Derived from proximity data",
-  "Umm"
-  "Derived from temporal data",
-  "Geospatial data",
-  "Census data",
-  "Geospatial data",
-  "Housing dataset",
-  "Housing dataset",
-  "Housing dataset",
-  "Housing dataset",
-  "Census data"
-)
-
-units <- c(
-  "Log Pounds",
-  "Binary",
-  "Kilometre"
-  "Binary",
-  "Log metre",
-  "Log population density",
-  "Log metre",
-  "Binary",
-  "Binary",
-  "Binary",
-  "Average number",
-  "Average level"
-)
-
-# Create the summary table
-summary_table <- data.frame(
-  Variable = variables,
-  Description = descriptions,
-  Source = sources,
-  Mean = round(means, 2),
-  `Std. dev` = round(std_devs, 2),
-  Unit = units,
-  stringsAsFactors = FALSE
-)
-
-# Display the summary table
-print(summary_table)
 
 # summary of the n for variables
 #n crossrail, underground stops, 

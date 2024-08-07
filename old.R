@@ -255,3 +255,65 @@ summary(central_regression)
 
 # Check VIF
 vif(central_regression, type = "predictor")
+
+
+
+
+
+#using sample
+# Install and load necessary packages
+library(MatchIt)
+library(dplyr)
+library(cobalt)
+
+
+# Step 1: Estimate propensity scores and perform matching
+# Assuming 'close_to_crossrail' is the treatment indicator
+matchit_formula <- close_to_crossrail ~ log_underground_distance + log_population_density + 
+  employment_rate + percent_households_deprived + log_min_distance_to_caz +
+  terraced_binary + flat_binary
+
+# Perform nearest neighbor matching
+psm <- matchit(matchit_formula, data = sampled_data, method = "nearest")
+set.cobalt.options(binary = "std")
+
+# variable names 
+new.names <- c(flat_binary = "Flat",
+               terraced_binary = "Terraced",
+               close_to_crossrail = "Close to Crossrail",
+               log_underground_distance = "Underground Distance",
+               log_population_density = "Population Density",
+               employment_rate = "Employment Rate",
+               percent_households_deprived = "Household Deprivation")
+
+# Step 2: Check balance
+
+summary(psm)
+sample_plot <- love.plot(psm,
+                         stars = "raw",
+                         drop.distance = TRUE, 
+                         var.order = "unadjusted",
+                         var.names = new.names,
+                         abs = TRUE,
+                         line = TRUE, 
+                         colors = c("#377EB8", "#E41A1C"),
+                         thresholds = c(m = .1),
+                         position = c(.75, .25))+
+  theme(legend.box.background = element_rect(), 
+        legend.box.margin = margin(1, 1, 1, 1))
+
+sample_plot
+#need to define stars in text https://cran.r-project.org/web/packages/cobalt/vignettes/love.plot.html
+
+# Step 3: Extract matched data
+matched_data <- match.data(psm)
+
+# Step 4: Run the DiD regression model on matched data
+did_model_matched <- lm(log_price ~ close_to_crossrail * post_treatment +
+                          log_underground_distance  +  log_population_density  + 
+                          employment_rate + percent_households_deprived + 
+                          terraced_binary + flat_binary,
+                        data = matched_data)
+
+# Summarize the matched model
+summary(did_model_matched)
