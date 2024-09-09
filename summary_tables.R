@@ -106,109 +106,134 @@ variable_table <- data.frame(
 stargazer(summary_table, type = "html", summary = FALSE, rownames = FALSE,
           out = "variable_table.htm")
 
-# looking at summary_data, make a table with the mean, median, range, and standard deviation of log_price, closs_to_crossrail, post_treatment, log_underground_distance, log_population_density, log_min_distance_to_caz, flat_binary, semi_detached_binary, avg_bedrooms, and average_qualification_level_4
+# looking at summary_data, make a table with the mean, median, range, and standard deviation of log_price, closs_to_crossrail, noiseclass, log_underground_distance, log_population_density, log_min_distance_to_caz, flat_binary, semi_detached_binary, avg_bedrooms, and average_qualification_level_4
 # Calculate the summary statistics
 library(dplyr)
 library(stargazer)
 library(tidyr)
 
+#find and adapt code from my nice old summary tables
 
 # Select the relevant columns and ensure they are numeric
-numeric_columns <- summary_data %>%
-  select(log_price, close_to_crossrail, nearest_crossrail, post_treatment, log_underground_distance, log_population_density, 
-         log_min_distance_to_caz, semi_detached_binary, detached_binary, flat_binary, terraced_binary, avg_bedrooms, average_qualification_level_4) %>%
+numeric_columns <- combined_df %>%
+  select(log_price_in_2010_pounds, price_in_2010_pounds, 
+         close_to_crossrail_network, road_distance_crossrail, 
+         noiseclass, log_population_density, 
+         avg_bedrooms, average_qualification_level_4,  employment_pct_60, 
+         old_new, log_subcentre_distance, travel_time_p50, noiseclass, log_crime_count, access_parks_30_pct, average_qualification_level_4) %>%
   mutate(across(everything(), as.numeric))
 
-# Rename columns
-colnames(numeric_columns) <- variables
 
-# Calculate the summary statistics using reframe and round values
-summary_stats <- numeric_columns %>%
-  reframe(
-    Variable = names(numeric_columns),
-    Mean = round(sapply(numeric_columns, mean, na.rm = TRUE), 2),
-    Median = round(sapply(numeric_columns, median, na.rm = TRUE), 2),
-    Range = round(sapply(numeric_columns, function(x) diff(range(x, na.rm = TRUE))), 2),
-    SD = round(sapply(numeric_columns, sd, na.rm = TRUE), 2)
+
+
+
+library(dplyr)
+library(tidyr)
+
+# Function to calculate summary statistics for a specific group
+calculate_summary <- function(data) {
+  data %>%
+    summarise(
+      count = n(),
+      Mean = round(mean(log_price, na.rm = TRUE), 2),
+      Median = round(median(log_price, na.rm = TRUE), 2),
+      SD = round(sd(log_price, na.rm = TRUE), 2),
+      Min = round(min(log_price, na.rm = TRUE), 2),
+      Max = round(max(log_price, na.rm = TRUE), 2)
+    )
+}
+
+# Calculate summary statistics for close_to_crossrail_network = 1
+summary_stats_1 <- numeric_columns %>%
+  filter(close_to_crossrail_network == 1) %>%
+  summarise_all(list(mean = ~ mean(., na.rm = TRUE),
+                     median = ~ median(., na.rm = TRUE),
+                     sd = ~ sd(., na.rm = TRUE),
+                     min = ~ min(., na.rm = TRUE),
+                     max = ~ max(., na.rm = TRUE))) %>%
+  mutate(close_to_crossrail_network = 1)
+
+# Calculate summary statistics for close_to_crossrail_network = 0
+summary_stats_0 <- numeric_columns %>%
+  filter(close_to_crossrail_network == 0) %>%
+  summarise_all(list(mean = ~ mean(., na.rm = TRUE),
+                     median = ~ median(., na.rm = TRUE),
+                     sd = ~ sd(., na.rm = TRUE),
+                     min = ~ min(., na.rm = TRUE),
+                     max = ~ max(., na.rm = TRUE))) %>%
+  mutate(close_to_crossrail_network = 0)
+
+# Combine the two summary tables
+final_combined_summary <- bind_rows(summary_stats_1, summary_stats_0) %>%
+  pivot_longer(cols = -close_to_crossrail_network, names_to = "Statistic", values_to = "Value") %>%
+  pivot_wider(names_from = close_to_crossrail_network, values_from = Value)
+
+# Rename the columns to indicate the group
+colnames(final_combined_summary) <- c("Statistic", "Crossrail_0", "Crossrail_1")
+
+# Print the resulting combined data frame
+print(final_combined_summary)
+
+#how many 1 in noiseclass in summary_stats_0
+subset_crossrail_0 %>%
+  filter(noiseclass == 0) %>%
+  summarise(count = n())
+
+#percentage of 1 vs percentage of 0 in noiseclass in summary_stats_0
+subset_crossrail_0 %>%
+  summarise(
+    noiseclass_2 = sum(noiseclass == 2, na.rm = TRUE),
+    noiseclass_1 = sum(noiseclass == 1, na.rm = TRUE),
+    total = n(),
+    percentage_2 = noiseclass_2 / total * 100,
+    percentage_1 = noiseclass_1 / total * 100
   )
 
-# Convert summary_stats to long format and then reshape it to wide format
-summary_stats_long <- summary_stats %>%
-  pivot_longer(cols = -Variable, names_to = "Statistic", values_to = "Value") %>%
-  pivot_wider(names_from = Statistic, values_from = Value)
 
+library(dplyr)
 
-# Display the summary statistics table using stargazer
-stargazer(summary_stats_long, type = "html", summary = FALSE, rownames = FALSE,
-          out = "summary_stats_table.htm")
+# Assuming 'combined_df' is your data frame and it includes columns for 'region', 'property_type', and 'log_price'
+library(dplyr)
+library(tidyr)
 
+# Calculate overall mean log price, count, and percentage for each region
+overall_summary <- combined_df %>%
+  group_by(region) %>%
+  summarise(
+    Mean_Log_Price = mean(price_in_2010_pounds, na.rm = TRUE),
+    n = n(),
+    .groups = 'drop'
+  ) %>%
+  mutate(Percentage = n / sum(n) * 100)
 
+# Print overall summary
+print(overall_summary)
+# Calculate mean log price, count, and percentage by property type within each region
+property_type_summary <- combined_df %>%
+  group_by(region, property_type) %>%
+  summarise(
+    Mean_Log_Price = mean(price_in_2010_pounds, na.rm = TRUE),
+    n = n(),
+    .groups = 'drop'
+  ) %>%
+  left_join(overall_summary, by = "region", suffix = c("", "_total")) %>%
+  mutate(Percentage = n / n_total * 100) %>%
+  select(region, property_type, Mean_Log_Price, n, Percentage) %>%
+  pivot_wider(names_from = region, values_from = c(Mean_Log_Price, n, Percentage))
 
-# summary for non detached
+# Print property type summary
+print(property_type_summary)
+# Add an "Overall" entry to the property type summary for each region
+overall_summary_wide <- overall_summary %>%
+  pivot_wider(names_from = region, values_from = c(Mean_Log_Price, n, Percentage)) %>%
+  mutate(property_type = "Overall")
 
-# exclude D in property type from summary data
-non_summary_data <- summary_data %>%
-  filter(property_type != "D")
+# Combine the overall summary with the property-type-specific summary
+final_summary_table <- bind_rows(overall_summary_wide, property_type_summary)
 
-#how many rows are in the non_summary_data excl
+# Arrange the final table for clarity
+final_summary_table <- final_summary_table %>%
+  arrange(factor(property_type, levels = c("Overall", "Detached", "Semi-Detached", "Terraced", "Flat")))
 
-# Select the relevant columns and ensure they are numeric
-numeric_columns <- non_summary_data %>%
-  select(log_price, close_to_crossrail, nearest_crossrail, post_treatment, log_underground_distance, log_population_density, 
-         log_min_distance_to_caz, semi_detached_binary,  flat_binary, terraced_binary, avg_bedrooms, average_qualification_level_4) %>%
-  mutate(across(everything(), as.numeric))
-
-non_variables <- c("Price", "closeToCrossrail", "nearestCrossrail", "postTreatment", "undergroundDistance", 
-               "populationDensity", "cazDistance", "semiDetachedBinary", 
-               "flatBinary", "terracedBinary", "avgBedrooms", "qualificationLevel4")
-
-# Rename columns
-colnames(numeric_columns) <- non_variables
-
-# Calculate the summary statistics using reframe and round values
-summary_stats <- numeric_columns %>%
-  reframe(
-    Variable = names(numeric_columns),
-    Mean = round(sapply(numeric_columns, mean, na.rm = TRUE), 2),
-    Median = round(sapply(numeric_columns, median, na.rm = TRUE), 2),
-    Range = round(sapply(numeric_columns, function(x) diff(range(x, na.rm = TRUE))), 2),
-    SD = round(sapply(numeric_columns, sd, na.rm = TRUE), 2)
-  )
-
-# Convert summary_stats to long format and then reshape it to wide format
-non_summary_stats_long <- summary_stats %>%
-  pivot_longer(cols = -Variable, names_to = "Statistic", values_to = "Value") %>%
-  pivot_wider(names_from = Statistic, values_from = Value)
-
-
-# Display the summary statistics table using stargazer
-stargazer(non_summary_stats_long, type = "html", summary = FALSE, rownames = FALSE,
-          out = "non_summary_stats_table.htm")
-
-# what is the mean price in summary_table for each property_type 
-# Calculate the mean price for each property type
-mean_price_by_property_type <- summary_data %>%
-  group_by(property_type) %>%
-  summarise(Mean_Price = mean(price, na.rm = TRUE))
-
-# Display the mean price by property type table using pritn
-print(mean_price_by_property_type)
-
-library(stargazer)
-# Create a data frame with the RESET test results
-# Create a data frame with the RESET test results
-reset_test_results <- data.frame(
-  Model = c("Western Detached", "Eastern Detached", "Western Flat", "Eastern Flat",
-            "Western Semi-Detached", "Eastern Semi-Detached", "Western Terraced", "Eastern Terraced"),
-  RESET = c(28.6, 51.618, 209.75, 440.99, 137.61, 89.877, 445.75, 358.55),
-  df1 = c(2, 2, 2, 2, 2, 2, 2, 2),
-  df2 = c(7757, 5070, 39941, 48867, 19176, 18620, 31921, 53142),
-  p_value = c("4.215e-13", "< 2.2e-16", "< 2.2e-16", "< 2.2e-16", "< 2.2e-16", "< 2.2e-16", "< 2.2e-16", "< 2.2e-16")
-)
-
-# Present the table using stargazer
-stargazer(reset_test_results, type = "html", summary = FALSE, rownames = FALSE,
-          title = "Comparison of RESET Tests for Different Models",
-          column.labels = c("Model", "RESET", "df1", "df2", "p-value"),
-          out = "reset_test_results.htm")
-
+# Print the final summary table
+print(final_summary_table)

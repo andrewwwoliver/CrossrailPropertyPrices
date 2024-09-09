@@ -183,3 +183,71 @@ census_data <- census_data %>%
 #save census data
 save(census_data, file = "census_data.RData")
 
+library(sf)
+
+
+#Read GeoJSON LSOA into spatial df
+lsoa <- st_read("LSOA_2011_Boundaries.geojson")
+
+#select LSOA11CD and geometry
+lsoa <- lsoa %>% select(LSOA11CD, geometry)
+
+# load in employment data
+employment_data <- read_csv("employment_lsoa_2011.csv")
+
+#get rid of any text after : in LSOA2011CD , remove trailing spaces
+employment_data$LSOA11CD <- sub(":.*", "", employment_data$LSOA11CD)
+
+#remove trailing spaces
+employment_data$LSOA11CD <- trimws(employment_data$LSOA11CD)
+
+
+#join the employees column to the LSOA data by LSOA11CD
+lsoa <- lsoa %>% inner_join(employment_data, by = "LSOA11CD")
+
+#rename Total to Employment
+lsoa <- lsoa %>% rename(Employment = Total)
+
+#make employment numeric
+lsoa$employment <- as.numeric(lsoa$Employment)
+
+# map the lsoas, highlight ones with employment above 20000, binary 1, 0 please
+lsoa$employment_high <- lsoa$employment > 10000
+
+# Define the bounding box coordinates
+bbox <- st_bbox(c(xmin = -1.1, xmax = 0.5, ymin = 51.35, ymax = 51.65), crs = st_crs(lsoa))
+
+# Convert bbox to an sf object
+bbox_sf <- st_as_sfc(bbox)
+#what crs
+st_crs(bbox_sf)
+# Ensure that the CRS of lsoa matches the CRS of the bbox
+lsoa <- st_transform(lsoa, st_crs(bbox_sf))
+
+# Filter LSOAs that intersect with the bounding box
+lsoa <- st_intersection(lsoa, bbox_sf)
+
+ggplot(data = lsoa) +
+  geom_sf(aes(fill = employment_high), color = "black", size = 0.1) +
+  scale_fill_manual(values = c("FALSE" = "lightgray", "TRUE" = "red"),
+                    labels = c("<= 10000", "> 10000"),
+                    name = "Employment") +
+  theme_minimal() +
+  theme(legend.position = "bottom")
+
+#how many in employment_high
+lsoa %>%
+  summarise(count = sum(employment_high))
+
+#convert to df
+lsoa <- as.data.frame(lsoa)
+
+## select LSOA11CD Employment and geometry
+lsoa <- lsoa %>% select(LSOA11CD, Employment)
+
+#save lsoa as rdata
+save(lsoa, file = "lsoa.RData")
+
+# link centroid populations to each lsoa , then calculate r5r distance to nearest centroid for each lsoa? or postcode?
+
+
